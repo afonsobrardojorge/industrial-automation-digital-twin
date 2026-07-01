@@ -1,0 +1,11 @@
+# Third-party notices
+
+## OpenPLC
+
+The Structured Text program in this repository is intended to be run with an OpenPLC-compatible IEC 61131-3 environment.
+
+- Project: OpenPLC Runtime
+- Upstream v3 repository: `https://github.com/thiagoralves/OpenPLC_v3`
+- Upstream v3 license: GNU General Public License v3.0
+
+No OpenPLC source code is copied into this repository. OpenPLC is referenced only as an external runtime ecosystem. The uploaded upstream README indicates that OpenPLC v3 has reached end of life and points users to OpenPLC Runtime v4; use a maintained runtime for any new installation.

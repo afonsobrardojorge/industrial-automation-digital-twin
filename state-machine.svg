@@ -1,0 +1,48 @@
+"""Simple operations dashboard for the reproducible demo telemetry."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parents[1]
+EVENTS_PATH = ROOT / "data" / "demo_events.jsonl"
+METRICS_PATH = ROOT / "data" / "demo_metrics.json"
+
+st.set_page_config(page_title="Industrial Automation Digital Twin", layout="wide")
+st.title("Industrial Automation Digital Twin")
+st.caption("Educational PLC simulation · OpenPLC-compatible Structured Text · deterministic telemetry")
+
+if not EVENTS_PATH.exists() or not METRICS_PATH.exists():
+    st.error("Demo data is missing. Run `python -m simulator.demo_run` from the repository root.")
+    st.stop()
+
+metrics = json.loads(METRICS_PATH.read_text(encoding="utf-8"))
+rows = [json.loads(line) for line in EVENTS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+events = pd.DataFrame(rows)
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Processed parts", metrics["total_parts"])
+col2.metric("Accepted parts", metrics["good_parts"])
+col3.metric("Rejected parts", metrics["rejected_parts"])
+col4.metric("Yield", f'{metrics["yield_rate"]:.1f}%')
+
+if metrics["maintenance_required"]:
+    st.warning("Preventive maintenance threshold reached in this demo scenario.")
+
+left, right = st.columns([1.2, 1])
+with left:
+    st.subheader("Event timeline")
+    st.dataframe(events[["sequence", "kind", "message", "state"]], use_container_width=True, hide_index=True)
+
+with right:
+    st.subheader("Event categories")
+    st.bar_chart(events["kind"].value_counts())
+    st.subheader("Final machine state")
+    st.code(json.dumps(metrics, indent=2), language="json")
+
+st.divider()
+st.caption("This dashboard uses simulated telemetry. It is not connected to a physical PLC or safety system.")

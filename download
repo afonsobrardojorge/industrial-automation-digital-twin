@@ -1,0 +1,133 @@
+"""Deterministic reference model for the PLC state machine.
+
+This is not a PLC runtime. It exists to make the project logic testable in a
+normal Python environment and to generate reproducible demo telemetry.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Dict, List
+
+
+class MachineState(str, Enum):
+    STOPPED = "stopped"
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
+    EMERGENCY_STOP = "emergency_stop"
+
+
+@dataclass
+class Event:
+    sequence: int
+    kind: str
+    message: str
+    state: str
+    total_parts: int
+    good_parts: int
+    rejected_parts: int
+
+    def as_dict(self) -> Dict[str, object]:
+        return {
+            "sequence": self.sequence,
+            "kind": self.kind,
+            "message": self.message,
+            "state": self.state,
+            "total_parts": self.total_parts,
+            "good_parts": self.good_parts,
+            "rejected_parts": self.rejected_parts,
+        }
+
+
+@dataclass
+class AutomationCell:
+    maintenance_threshold: int = 500
+    state: MachineState = MachineState.STOPPED
+    conveyor_motor: bool = False
+    reject_cylinder: bool = False
+    total_parts: int = 0
+    good_parts: int = 0
+    rejected_parts: int = 0
+    maintenance_required: bool = False
+    events: List[Event] = field(default_factory=list)
+
+    def _log(self, kind: str, message: str) -> None:
+        self.events.append(
+            Event(
+                sequence=len(self.events) + 1,
+                kind=kind,
+                message=message,
+                state=self.state.value,
+                total_parts=self.total_parts,
+                good_parts=self.good_parts,
+                rejected_parts=self.rejected_parts,
+            )
+        )
+
+    def start(self, manual_mode: bool = False) -> None:
+        if self.state is MachineState.EMERGENCY_STOP:
+            self._log("blocked", "Start ignored while emergency stop is active")
+            return
+        self.state = MachineState.MANUAL if manual_mode else MachineState.AUTOMATIC
+        self.conveyor_motor = not manual_mode
+        self.reject_cylinder = False
+        self._log("state", f"Machine entered {self.state.value} mode")
+
+    def stop(self) -> None:
+        self.state = MachineState.STOPPED
+        self.conveyor_motor = False
+        self.reject_cylinder = False
+        self._log("state", "Machine stopped")
+
+    def emergency_stop(self) -> None:
+        self.state = MachineState.EMERGENCY_STOP
+        self.conveyor_motor = False
+        self.reject_cylinder = False
+        self._log("safety", "Emergency stop activated; outputs forced safe")
+
+    def reset_fault(self) -> None:
+        if self.state is MachineState.EMERGENCY_STOP:
+            self.state = MachineState.STOPPED
+            self._log("safety", "Emergency stop reset; operator action required before restart")
+
+    def set_manual_outputs(self, conveyor: bool, reject: bool) -> None:
+        if self.state is not MachineState.MANUAL:
+            raise RuntimeError("Manual outputs can only be controlled in manual mode")
+        self.conveyor_motor = conveyor
+        self.reject_cylinder = reject
+        self._log("manual", f"Manual outputs set: conveyor={conveyor}, reject={reject}")
+
+    def process_part(self, quality_ok: bool) -> None:
+        if self.state is not MachineState.AUTOMATIC:
+            self._log("blocked", "Part ignored because automatic mode is not active")
+            return
+
+        self.total_parts += 1
+        if quality_ok:
+            self.good_parts += 1
+            self.reject_cylinder = False
+            self._log("production", "Accepted part")
+        else:
+            self.rejected_parts += 1
+            self.reject_cylinder = True
+            self._log("quality", "Rejected defective part")
+            self.reject_cylinder = False
+
+        if self.total_parts >= self.maintenance_threshold and not self.maintenance_required:
+            self.maintenance_required = True
+            self._log("maintenance", "Preventive maintenance threshold reached")
+
+    @property
+    def metrics(self) -> Dict[str, object]:
+        yield_rate = (self.good_parts / self.total_parts * 100) if self.total_parts else 0.0
+        return {
+            "state": self.state.value,
+            "total_parts": self.total_parts,
+            "good_parts": self.good_parts,
+            "rejected_parts": self.rejected_parts,
+            "yield_rate": round(yield_rate, 2),
+            "maintenance_required": self.maintenance_required,
+            "conveyor_motor": self.conveyor_motor,
+            "reject_cylinder": self.reject_cylinder,
+        }
